@@ -47,7 +47,8 @@ def generate_plots():
     x_boat_coords = []
     y_boat_coords = []
 
-
+    x_ping_coords = []
+    y_ping_coords = []
 
     for p in ping_coords:
         x_boat_coords.append(p[0])
@@ -57,17 +58,16 @@ def generate_plots():
     plt.xlabel("X coordinate")
     plt.ylabel("Y coordinate")
     plt.title("Plotting boat coordinates 2D")
-    plt.legend()
+
     plt.ylim(-10, 10)
 
     for ping in ping_point_rows:
-        x_ping_coords = []
-        y_ping_coords = []
-
         for point in ping:
             x_ping_coords.append(point[0])
             y_ping_coords.append(point[1])
-        plt.plot(x_ping_coords, y_ping_coords, "bo", ms=0.4)
+
+    plt.plot(x_ping_coords, y_ping_coords, "bo", ms=0.4, label = "Sonar Points")
+    plt.legend()
     plt.show()
 # TODO account for changing of basis vectors when boat rotates (VERY IMPORTANT)
 
