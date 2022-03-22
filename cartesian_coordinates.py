@@ -6,6 +6,7 @@ from math import sin, cos, acos
 from numpy.linalg import norm
 from numpy import dot, pi, transpose
 import matplotlib.pyplot as plt
+import json
 
 # Setup dataset
 path = "NBS-Snippets-Sensor-WC.s7k"
@@ -30,6 +31,7 @@ ping_point_rows = []
 rotated_points = []
 boat_directions = []
 
+
 def compute_coordinates():
     for p in dataset:
         # Setting cartesian coordinates for each ping location with ping0 as 0-reference
@@ -52,6 +54,7 @@ def compute_coordinates():
             p_points.append((p_x, point_y, point_z))
         ping_point_rows.append(p_points)
         rotated_points.append(deepcopy(p_points))
+
 
 def rotate_individual_pings():
     for ping_i, ping_point_row in enumerate(rotated_points):
@@ -121,6 +124,33 @@ def generate_plots():
     plt.legend()
     plt.show()
 
+
+def generate_json():
+    data = {}
+    data["no_pings"] = len(ping_coords)
+    data["pings"] = []
+
+    for i, point_row in enumerate(ping_point_rows):
+        ping = {
+            "pingID": i,
+            "no_points": len(point_row),
+            "ping_coord": list(ping_coords[i]),
+            "coords_x": [],
+            "coords_y": [],
+            "coords_z": []
+        }
+
+        for x,y,z in point_row:
+            ping["coords_x"].append(x)
+            ping["coords_y"].append(y)
+            ping["coords_z"].append(z)
+
+        data["pings"].append(ping)
+
+    with open("7k_data_extracted.json", "w") as f:
+        json.dump(data, f)
+
 compute_coordinates()
-rotate_individual_pings()
+generate_json()
+#rotate_individual_pings()
 generate_plots()
