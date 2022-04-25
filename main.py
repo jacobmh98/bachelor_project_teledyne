@@ -23,7 +23,6 @@ base_long = ping0.position_set[0].longitude
 R = 6371 * 1000  # Earths radius
 base_x = R * math.cos(base_lat) * math.cos(base_long)
 base_y = R * math.cos(base_lat) * math.sin(base_long)
-base_z = R * math.sin(base_lat)
 
 # List to save the boats coordinates for each ping
 ping_boat_coord = []
@@ -267,8 +266,8 @@ def generate_json(pointcloud):
     data = {}
     data["no_pings"] = ping_amount
     data["no_counts"] = number_of_counts_sum
-    data["Highest point"] = math.ceil(highest_point)
-    data["Lowest point"] = math.floor(lowest_point)
+    data["minimum_depth"] = math.ceil(highest_point)
+    data["maximum_depth"] = math.floor(lowest_point)
     data["pings"] = []
 
     for i, point_row in enumerate(pointcloud):
@@ -293,5 +292,4 @@ def generate_json(pointcloud):
 
 
 pointcloud = to_pointcloud(dataset)
-print(ping_boat_coord)
 generate_json(pointcloud)
