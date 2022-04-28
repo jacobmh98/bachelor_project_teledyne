@@ -14,6 +14,12 @@ dataset = pyread7k.FileDataset(path)
 highest_point = -1.7976931348623157e+308  # Smallest negative float that is not negative infinity
 lowest_point = 1.7976931348623157e+308  # Biggest float that is not infinity
 
+# Largest and smallest values for length and width axis
+min_length_axis = 1.7976931348623157e+308
+max_length_axis = -1.7976931348623157e+308
+min_width_axis = 1.7976931348623157e+308
+max_width_axis = -1.7976931348623157e+308
+
 # Setting first ping for base coordinates
 ping0 = dataset[0]
 base_lat = ping0.position_set[0].latitude
@@ -187,7 +193,6 @@ def to_points(ping: Ping, correct_motion: bool = True):
         rotated_points: The motion corrected points in x-y-z coordinates
 
     """
-    global lowest_point, highest_point
 
     # Check if roll compensation has been applied
     roll_corrected = ping.sonar_settings.receive_flags == 1
@@ -197,13 +202,6 @@ def to_points(ping: Ping, correct_motion: bool = True):
         points = rotate(ping, indices, raw_points, roll_corrected)
     else:
         points = raw_points
-
-    # Checking if any of the points in the ping is higher or lower than the before found highest and lowest point
-    for point in points:
-        if point[2] > highest_point:
-            highest_point = point[2]
-        elif point[2] < lowest_point:
-            lowest_point = point[2]
 
     # Calculating the boats position at the current ping
     ping_boat_coord.append(boat_coordinates(ping))
@@ -252,6 +250,21 @@ def to_pointcloud(dataset, correct_motion: bool = True):
         associated_pings.append(np.ones_like(amps) * ping.ping_number)
         associated_index.append(np.ones_like(amps) * i)
 
+        global lowest_point, highest_point, min_length_axis, max_length_axis, min_width_axis, max_width_axis
+        for point in new_xyz:
+            if point[2] > highest_point:
+                highest_point = point[2]
+            elif point[2] < lowest_point:
+                lowest_point = point[2]
+            if point[0] < min_length_axis:
+                min_length_axis = point[0]
+            elif point[0] > max_length_axis:
+                max_length_axis = point[0]
+            if point[1] < min_width_axis:
+                min_width_axis = point[1]
+            elif point[1] > max_width_axis:
+                max_width_axis = point[1]
+
     dataset.minimize_memory()
 
     return pointcloud
@@ -268,6 +281,10 @@ def generate_json(pointcloud):
     data["no_counts"] = number_of_counts_sum
     data["minimum_depth"] = math.ceil(highest_point)
     data["maximum_depth"] = math.floor(lowest_point)
+    data["min_length_axis"] = math.floor(min_length_axis)
+    data["max_length_axis"] = math.ceil(max_length_axis)
+    data["min_width_axis"] = math.floor(min_width_axis)
+    data["max_width_axis"] = math.ceil(max_width_axis)
     data["pings"] = []
 
     for i, point_row in enumerate(pointcloud):
