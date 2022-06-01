@@ -1,5 +1,4 @@
 import sys
-
 import numpy as np
 import math
 import pyread7k
@@ -9,10 +8,9 @@ from pyread7k import Ping
 from geopy import Point
 from geopy.distance import distance
 from progressbar import progressbar
-from time import sleep
 
 if __name__ == '__main__':
-    """
+
     if len(sys.argv) > 1:
         print(sys.argv[1])
         path = sys.argv[1]
@@ -20,10 +18,9 @@ if __name__ == '__main__':
         print("No path chosen, path set to: ")
         path = "C:/Users/Max/Desktop/NBS-Snippets-Sensor-WC+-+1.s7k"
         print(path)
-    """
+
+    path = input()
     # Setup dataset
-    input1 = input()
-    path = input1;
     print("Path is: " + path)
     if(not(os.path.exists(path))):
         print("PATH DOESN'T EXIST!")
@@ -39,40 +36,8 @@ if __name__ == '__main__':
     min_width_axis = 1.7976931348623157e+308
     max_width_axis = -1.7976931348623157e+308
 
-    # Setting first ping for base coordinates
-    ping0 = dataset[0]
-    #print(ping0)
-    #base_lat = ping0.position_set[0].latitude
-    #base_long = ping0.position_set[0].longitude
-
-    # Calculating cartesian coordinates for first ping
-    R = 6371 * 1000  # Earths radius
-    #base_x = R * math.cos(base_lat) * math.cos(base_long)
-    #base_y = R * math.cos(base_lat) * math.sin(base_long)
-
     # List to save the boats coordinates for each ping
     ping_boat_coord = []
-    #print("Loading values...")
-
-
-    def boat_coordinates(ping):
-        """ Setting cartesian coordinates for the boat for
-        a ping location with ping0 as 0-reference
-
-        Args:
-            ping: A s7k ping
-        Returns:
-            The boats coordinates at the given ping
-
-        """
-        #print("Setting boat coordinates...")
-        ping_lat = ping.position_set[0].latitude
-        ping_long = ping.position_set[0].longitude
-        ping_x = R * math.cos(ping_lat) * math.cos(ping_long) - base_x
-        ping_y = R * math.cos(ping_lat) * math.sin(ping_long) - base_y
-        #print("Set boat coordinates!")
-        return [ping_x, ping_y, 0.0]
-
 
     def translate(points, bearing, dist):
         """Apply a translation to the points
@@ -134,6 +99,7 @@ if __name__ == '__main__':
                 ping.raw_detections.detections["rx_angle"],
             )
         ).T
+        print(ping.raw_detections.detections["detection_point"])
         indices = np.array(list(zip(
             ping.raw_detections.detections["detection_point"].astype(int),
             ping.raw_detections.detections["beam_descriptor"].astype(int),
@@ -150,7 +116,7 @@ if __name__ == '__main__':
             ]
         )
         points_amplitudes = ping.raw_detections.detections["intensity"].reshape(-1, 1)
-        #print("Done with bda!")
+        #print(raw_points)
         return indices, points_amplitudes, raw_points
 
 
@@ -171,7 +137,11 @@ if __name__ == '__main__':
         """Pitch rotation matrix - Rotation of beta around the y-axis"""
         #print("Created pitch rotation matrix!")
         return np.array(
-            [[np.cos(beta), 0, np.sin(beta)], [0, 1, 0], [-np.sin(beta), 0, np.cos(beta)]]
+            [
+                [np.cos(beta), 0, np.sin(beta)],
+                [0, 1, 0],
+                [-np.sin(beta), 0, np.cos(beta)]
+            ]
         )
 
 
@@ -198,18 +168,13 @@ if __name__ == '__main__':
         rotated_points = np.zeros_like(points)
         for i, idx in enumerate(indices):
             rph, h = ping.receiver_motion_for_sample(idx[0])
-            if roll_corrected:
-                euler_roll = -np.arcsin(np.sin(rph.roll) / (np.cos(rph.pitch)))
-                rotmat = Rmat(rph.pitch, euler_roll, h.heading)  # rph.roll)
-            else:
-                euler_roll = -np.arcsin(np.sin(rph.roll) / (np.cos(rph.pitch)))
-                rotmat = Rmat(rph.pitch, euler_roll, h.heading)
-
+            euler_roll = -np.arcsin(np.sin(rph.roll) / (np.cos(rph.pitch)))
+            rotmat = Rmat(rph.pitch, euler_roll, h.heading)  # rph.roll)
             rotated_points[i, :] = np.dot(points[i, :].reshape(1, -1), rotmat)
             # Correct for heave
             rotated_points[i, -1] += rph.heave
         #print("Rotated the points!")
-        return rotated_points
+        return rotated_points, rph.heave
 
 
     def to_points(ping: Ping, correct_motion: bool = True):
@@ -234,14 +199,14 @@ if __name__ == '__main__':
 
         indices, points_amplitudes, raw_points = bda(ping)
         if correct_motion:
-            points = rotate(ping, indices, raw_points, roll_corrected)
+            points, heave = rotate(ping, indices, raw_points, roll_corrected)
         else:
             points = raw_points
 
         # Calculating the boats position at the current ping
         #ping_boat_coord.append(boat_coordinates(ping))
         #print("Created points from a ping!")
-        return indices, points_amplitudes, points
+        return indices, points_amplitudes, points, heave
 
 
     def to_pointcloud(dataset, correct_motion: bool = True):
@@ -279,7 +244,13 @@ if __name__ == '__main__':
                 else:
                     dist = 0
                     phi = 0
-                idx, amps, rotp = to_points(ping, correct_motion)
+                idx, amps, rotp, heave = to_points(ping, correct_motion)
+
+                # Calculating boat points
+                boat_point_x = dist * math.cos(phi)
+                boat_point_y = dist * math.sin(phi)
+
+                ping_boat_coord.append([boat_point_x, boat_point_y, heave])
 
                 new_xyz = translate(rotp, phi, dist)
                 pointcloud.append(new_xyz)
@@ -332,7 +303,7 @@ if __name__ == '__main__':
                 ping = {
                     "pingID": i,
                     "no_points": len(point_row),
-                    #"ping_boat_coord": ping_boat_coord[i],
+                    "ping_boat_coord": ping_boat_coord[i],
                     "coords_x": [],
                     "coords_y": [],
                     "coords_z": []
@@ -345,7 +316,7 @@ if __name__ == '__main__':
 
                 data["pings"].append(ping)
 
-            with open("7k_data_extracted_rotated.json", "w") as f:
+            with open("point_cloud_data.json", "w") as f:
                 json.dump(data, f)
         print("Generated JSON!")
 
