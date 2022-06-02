@@ -4,7 +4,6 @@ import math
 import pyread7k
 import json
 import os
-from pyread7k import Ping
 from geopy import Point
 from geopy.distance import distance
 from progressbar import progressbar
@@ -16,7 +15,7 @@ if __name__ == '__main__':
         path = sys.argv[1]
     else:
         print("No path chosen, path set to: ")
-        path = "C:/Users/Kanne/Desktop/NBS-Snippets-Sensor-WC+-+1.s7k"
+        path = "C:/Users/Kanne/Desktop/NBS-Snippets-Sensor-WC.s7k"
         print(path)
 
     path = input()
@@ -80,7 +79,14 @@ if __name__ == '__main__':
 
 
     def BDA(ping):
-        """Computes the raw points and indicies for a ping"""
+        """Computes the raw points and indices for a ping.
+        Args:
+            ping: A .s7k ping
+        Returns:
+            indices: A list of the pings indices
+            rawPoints: A list of the pings raw points
+        """
+
         raw_rb = np.vstack(
             (
                 ping.raw_detections.detections["detection_point"]
@@ -104,36 +110,44 @@ if __name__ == '__main__':
                 for k in range(len(raw_rb))
             ]
         )
-        pointsAmplitudes = ping.raw_detections.detections["intensity"].reshape(-1, 1)
 
-        return indices, pointsAmplitudes, rawPoints
+        return indices, rawPoints
 
 
     def RotationMatrix(pitch: float, roll: float, yaw: float):
-        """Create the yaw, pitch, and roll matrix."""
+        """Creating the rotation matrix from the boats position
+        when recording the ping, by multiplying the three axes'
+        rotation matrices
+            Args:
+                pitch: Pitch of the boat
+                yaw: Yaw of the boat
+                roll: Roll of the boat
+            Returns:
+                R: The rotation matrix
+        """
 
-        #Yaw rotation matrix - Rotation of yaw around the z-axis
-        yawRotation = np.array([
-                            [np.cos(yaw), -np.sin(yaw), 0],
-                            [np.sin(yaw), np.cos(yaw), 0],
-                            [0, 0, 1],
-                        ])
+        # Yaw rotation matrix - Rotation of yaw around the z-axis
+        yawRotationMatrix = np.array([
+                                        [np.cos(yaw), -np.sin(yaw), 0],
+                                        [np.sin(yaw), np.cos(yaw), 0],
+                                        [0, 0, 1],
+                                     ])
 
         # Pitch rotation matrix - Rotation of pitch around the y-axis
-        pitchRotation = np.array([
-                            [np.cos(pitch), 0, np.sin(pitch)],
-                            [0, 1, 0],
-                            [-np.sin(pitch), 0, np.cos(pitch)]
-                          ])
+        pitchRotationMatrix = np.array([
+                                        [np.cos(pitch), 0, np.sin(pitch)],
+                                        [0, 1, 0],
+                                        [-np.sin(pitch), 0, np.cos(pitch)]
+                                       ])
 
         # Roll rotation matrix - Rotation of roll around the x-axis
-        rollRotation = np.array([
-                            [1, 0, 0],
-                            [0, np.cos(roll), -np.sin(roll)],
-                            [0, np.sin(roll), np.cos(roll)]
-                         ])
+        rollRotationMatrix = np.array([
+                                        [1, 0, 0],
+                                        [0, np.cos(roll), -np.sin(roll)],
+                                        [0, np.sin(roll), np.cos(roll)]
+                                      ])
 
-        return rollRotation @ pitchRotation @ yawRotation
+        return rollRotationMatrix @ pitchRotationMatrix @ yawRotationMatrix
 
 
     def Rotate(ping, indices: np.ndarray, points: np.ndarray):
@@ -151,64 +165,38 @@ if __name__ == '__main__':
         rotatedPoints = np.zeros_like(points)
 
         for i, idx in enumerate(indices):
-            rph, h = ping.receiver_motion_for_sample(idx[0])
-            eulerRoll = -np.arcsin(np.sin(rph.roll) / (np.cos(rph.pitch)))
-            heave = rph.heave
+            rollPitchHeave, h = ping.receiver_motion_for_sample(idx[0])
+            eulerRoll = -np.arcsin(np.sin(rollPitchHeave.roll) / (np.cos(rollPitchHeave.pitch)))
+            heave = rollPitchHeave.heave
 
             # Creating rotation matrix R
-            R = RotationMatrix(rph.pitch, eulerRoll, h.heading)
+            R = RotationMatrix(rollPitchHeave.pitch, eulerRoll, h.heading)
 
             # Applying R to all points
             rotatedPoints[i, :] = np.dot(points[i, :].reshape(1, -1), R)
 
-            # Correcting for heave
+            # Correcting points for heave
             rotatedPoints[i, -1] += heave
 
         return rotatedPoints, heave
 
 
-    def ToPoints(ping: Ping):
-        """Create points from a ping
-        This function is used to create x,y,z points from a pings amplitudes and motion parameters
-        Args:
-            ping: A s7k ping
-            cm_per_sample: Number of centimeters per sample. Default is 10.
-            point_filter: A filter that selects relevant samples and beams. Default is the simple amplitude filter.
-            detections: Flag specifying whether to use the raw detections. Default is false
-        Returns:
-            indices: A list of indices that were deemed relevant
-            points_amplitudes: The amplitudes of the detections
-            raw_points: The raw points in x-y-z coordinates (x=0)
-        """
-
-        # Creating raw points for ping
-        indices, pointsAmplitudes, rawPoints = BDA(ping)
-
-        rotatedPoints, heave = Rotate(ping, indices, rawPoints)
-
-        return indices, pointsAmplitudes, rotatedPoints, heave
-
-
     def ToPointcloud(dataset):
         """Create points clouds from an iterable of pings
         This function is used to create x,y,z points from a pings amplitudes and motion parameters.
-        NOTE: The current implementation of pyread7k doesn't support record 7503, meaning that
-              pointclouds created from sonars that are tilted, such as dual-head sonars, will
-              look correct but will be sloped oddly. An implementation of 7503 is underway.
         Args:
             dataset: An iterable of pings
         Returns:
-            An array of x,y,z, and an amplitudes array
+            pointcloud: All points sorted in pings from the .s7k file
         """
+
         print("Creating point cloud from pings...")
         for count in progressbar(range(1)):
-
-            indices = []
             pointcloud = []
-            amplitudes = []
             pings = [p for p in dataset if len(p.position_set) > 0]
             firstPing = pings[0]
 
+            # Iterating through every ping in the .s7k file
             for i, ping in enumerate(pings):
                 if not len(ping.position_set):
                     continue
@@ -218,17 +206,25 @@ if __name__ == '__main__':
                 else:
                     dist = 0
                     angle = 0
-                idx, amps, rotatedPoints, heave = ToPoints(ping)
+
+                # Computing raw points and indicies
+                indices, rawPoints = BDA(ping)
+
+                # Rotating points and computing heave for each ping
+                rotatedPoints, heave = Rotate(ping, indices, rawPoints)
+
+                # Translating rotated points to obtain the optimal transformed points
+                transformedPoints = Translate(rotatedPoints, angle, dist)
+
+                # Appending the transformed points to the pointcloud
+                pointcloud.append(transformedPoints)
 
                 # Calculating boat points
                 boatPointX = dist * math.cos(angle)
                 boatPointY = dist * math.sin(angle)
-                pingBoatCoordList.append([boatPointX, boatPointY, heave])
 
-                transformedPoints = Translate(rotatedPoints, angle, dist)
-                pointcloud.append(transformedPoints)
-                amplitudes.append(amps)
-                indices.append(idx)
+                # Appending the pings boat points to the list of boat points
+                pingBoatCoordList.append([boatPointX, boatPointY, heave])
 
                 # Finding the minimum and maximum values for each dimension, used to set slider values in Unity
                 global deepestPoint, shallowestPoint, minLength, maxLength, minWidth, maxWidth
@@ -253,6 +249,10 @@ if __name__ == '__main__':
 
 
     def generate_json(pointcloud):
+        """ Creates a JSON file from the pointcloud.
+        Args:
+            pointcloud: The computed pointcloud from the .s7k file
+        """
         print("Generating JSON...")
         for count in progressbar(range(1)):
 
