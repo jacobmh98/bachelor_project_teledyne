@@ -19,6 +19,7 @@ if __name__ == '__main__':
         print(path)
 
     path = input()
+
     # Setup dataset
     print("Path is: " + path)
     if(not(os.path.exists(path))):
@@ -87,6 +88,8 @@ if __name__ == '__main__':
             rawPoints: A list of the pings raw points
         """
 
+        # Creating a list consisting of the length from each transducer to
+        # their recorded detection point, and the transducers angle
         raw_rb = np.vstack(
             (
                 ping.raw_detections.detections["detection_point"]
@@ -95,11 +98,15 @@ if __name__ == '__main__':
                 ping.raw_detections.detections["rx_angle"],
             )
         ).T
+
+        # Creating the indices list, containing the detection point and transducer number
         indices = np.array(list(zip(
             ping.raw_detections.detections["detection_point"].astype(int),
             ping.raw_detections.detections["beam_descriptor"].astype(int),
         )))
 
+        # Applying the angle to the computed length to each detection point,
+        # to obtain its raw coordinates
         rawPoints = np.array(
             [
                 (
@@ -114,14 +121,14 @@ if __name__ == '__main__':
         return indices, rawPoints
 
 
-    def RotationMatrix(pitch: float, roll: float, yaw: float):
+    def RotationMatrix(pitch: float, eulerRoll: float, yaw: float):
         """Creating the rotation matrix from the boats position
         when recording the ping, by multiplying the three axes'
         rotation matrices
             Args:
                 pitch: Pitch of the boat
                 yaw: Yaw of the boat
-                roll: Roll of the boat
+                eulerRoll: Roll of the boat
             Returns:
                 R: The rotation matrix
         """
@@ -143,8 +150,8 @@ if __name__ == '__main__':
         # Roll rotation matrix - Rotation of roll around the x-axis
         rollRotationMatrix = np.array([
                                         [1, 0, 0],
-                                        [0, np.cos(roll), -np.sin(roll)],
-                                        [0, np.sin(roll), np.cos(roll)]
+                                        [0, np.cos(eulerRoll), -np.sin(eulerRoll)],
+                                        [0, np.sin(eulerRoll), np.cos(eulerRoll)]
                                       ])
 
         return rollRotationMatrix @ pitchRotationMatrix @ yawRotationMatrix
@@ -162,20 +169,27 @@ if __name__ == '__main__':
             heave: The heave for the ping, used for boat point calculations
         """
 
+        # Creating an empty list for the rotated points
         rotatedPoints = np.zeros_like(points)
 
-        for i, idx in enumerate(indices):
-            rollPitchHeave, h = ping.receiver_motion_for_sample(idx[0])
-            eulerRoll = -np.arcsin(np.sin(rollPitchHeave.roll) / (np.cos(rollPitchHeave.pitch)))
-            heave = rollPitchHeave.heave
+        # Extracting roll, pitch, heave and
+        rollPitchHeave, headingData = ping.receiver_motion_for_sample(indices[0][0])
 
-            # Creating rotation matrix R
-            R = RotationMatrix(rollPitchHeave.pitch, eulerRoll, h.heading)
+        # Computing the Euler roll angle
+        eulerRoll = -np.arcsin(np.sin(rollPitchHeave.roll) / (np.cos(rollPitchHeave.pitch)))
 
-            # Applying R to all points
+        # Extracting the heave value
+        heave = rollPitchHeave.heave
+
+        # Creating rotation matrix R
+        R = RotationMatrix(rollPitchHeave.pitch, eulerRoll, headingData.heading)
+
+        # Iterating through every point to correct their rotation and heave
+        for i in range(0,len(indices)):
+            # Applying R to the current point
             rotatedPoints[i, :] = np.dot(points[i, :].reshape(1, -1), R)
 
-            # Correcting points for heave
+            # Correcting the point for heave
             rotatedPoints[i, -1] += heave
 
         return rotatedPoints, heave
